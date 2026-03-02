@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Activity Intelligence</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Activity Intelligence</h1>
+        <p class="subtitle">Automatic NLP topics + multi-clustering + graph analytics</p>
+      </header>
+
+      <section class="controls card">
+        <label>
+          Max clusters
+          <input id="clusterCount" type="number" min="2" max="10" value="5" />
+        </label>
+        <label>
+          Time window
+          <select id="timeWindow">
+            <option value="60">Last 60 events</option>
+            <option value="120">Last 120 events</option>
+            <option value="200">Last 200 events</option>
+          </select>
+        </label>
+        <button id="runCluster">Analyze now</button>
+        <button id="clearData" class="danger">Clear data</button>
+      </section>
+
+      <section class="card">
+        <h2>Auto topic groups (NLP)</h2>
+        <div id="topicGroups"></div>
+      </section>
+
+      <section class="card">
+        <h2>Cluster comparison</h2>
+        <p class="muted">K-Means and Agglomerative clustering are both run automatically.</p>
+        <div id="clusters"></div>
+      </section>
+
+      <section class="card">
+        <h2>Similarity network graph</h2>
+        <canvas id="graph" width="560" height="260"></canvas>
+      </section>
+
+      <section class="card">
+        <h2>Individual website activity graph</h2>
+        <canvas id="siteGraph" width="560" height="220"></canvas>
+      </section>
+
+      <section class="card">
+        <h2>Correlation map (topic ↔ website)</h2>
+        <canvas id="correlationMap" width="560" height="260"></canvas>
+      </section>
+
+      <section class="card">
+        <h2>Recent activity</h2>
+        <ul id="activityList"></ul>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
