@@ -10,7 +10,7 @@
     <main>
       <header>
         <h1>Activity Intelligence</h1>
-        <p class="subtitle">Automatic NLP topics + multi-clustering + graph analytics</p>
+        <p class="subtitle">NLP context classification + adaptive learning + graph analytics</p>
       </header>
 
       <section class="controls card">
@@ -27,12 +27,19 @@
           </select>
         </label>
         <button id="runCluster">Analyze now</button>
+        <button id="saveCorrections">Save corrections</button>
         <button id="clearData" class="danger">Clear data</button>
       </section>
 
       <section class="card">
-        <h2>Auto topic groups (NLP)</h2>
+        <h2>Learned context classification</h2>
+        <p class="muted">Model predicts: Work, Personal Project, Research, Teaching Assistant, Course Work, Entertainment.</p>
         <div id="topicGroups"></div>
+      </section>
+
+      <section class="card">
+        <h2>Classification timeline (correctable)</h2>
+        <div id="classificationList"></div>
       </section>
 
       <section class="card">
@@ -52,7 +59,7 @@
       </section>
 
       <section class="card">
-        <h2>Correlation map (topic ↔ website)</h2>
+        <h2>Correlation map (class ↔ website)</h2>
         <canvas id="correlationMap" width="560" height="260"></canvas>
       </section>
 

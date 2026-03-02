@@ -5,13 +5,12 @@
   --card: #f8fbff;
   --card-border: #bad7f5;
   --accent: #6ea8fe;
-  --accent-2: #9ac8ff;
   --text-soft: #3f5f7e;
 }
 
 body {
   margin: 0;
-  width: 610px;
+  width: 630px;
   background: radial-gradient(circle at top right, #dceeff 0%, var(--bg) 55%, #eaf4ff 100%);
 }
 
@@ -48,15 +47,8 @@ p {
   flex-wrap: wrap;
 }
 
-label {
-  display: grid;
-  gap: 4px;
-  font-size: 0.8rem;
-}
-
-input,
-select,
-button {
+label { display: grid; gap: 4px; font-size: 0.8rem; }
+input, select, button {
   font: inherit;
   padding: 6px 9px;
   border-radius: 8px;
@@ -65,21 +57,8 @@ button {
   color: #143f66;
 }
 
-button {
-  cursor: pointer;
-  background: linear-gradient(180deg, var(--accent), #5b9aff);
-  color: #fff;
-  border-color: #6ea8fe;
-}
-
-button:hover {
-  filter: brightness(1.05);
-}
-
-button.danger {
-  background: linear-gradient(180deg, #f498b8, #e77aa4);
-  border-color: #e77aa4;
-}
+button { cursor: pointer; background: linear-gradient(180deg, var(--accent), #5b9aff); color: #fff; }
+button.danger { background: linear-gradient(180deg, #f498b8, #e77aa4); border-color: #e77aa4; }
 
 canvas {
   width: 100%;
@@ -89,23 +68,31 @@ canvas {
 }
 
 #clusters,
-#topicGroups {
+#topicGroups,
+#classificationList {
   display: grid;
   gap: 8px;
 }
 
 .cluster-card,
-.topic-card {
+.topic-card,
+.class-row {
   border: 1px solid #b5d7ff;
   border-radius: 10px;
   background: #f6fbff;
   padding: 8px;
 }
 
-.cluster-card h3,
-.topic-card h3 {
-  margin: 0 0 6px;
-  font-size: 0.92rem;
+.class-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.class-title {
+  font-size: 0.82rem;
+  color: #1a4469;
 }
 
 .cluster-card ul,
@@ -115,7 +102,4 @@ canvas {
   padding-left: 18px;
 }
 
-#activityList li {
-  margin: 3px 0;
-  font-size: 0.83rem;
-}
+#activityList li { margin: 3px 0; font-size: 0.83rem; }
