@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Activity Cluster Graph",
+  "version": "1.0.0",
+  "description": "Tracks browser activity, clusters it with lightweight NLP, and draws an activity graph.",
+  "permissions": ["tabs", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Activity Cluster Graph"
+  }
+}
