@@ -11,16 +11,20 @@ const TOPIC_LEXICON = {
   News: ["news", "times", "post", "breaking", "politics", "finance", "weather"]
 };
 
-function normalizeDomain(url = "") {
+function parseUrl(url = "") {
   try {
-    return new URL(url).hostname.replace(/^www\./, "");
+    const parsed = new URL(url);
+    return {
+      domain: parsed.hostname.replace(/^www\./, ""),
+      path: parsed.pathname.replace(/^\//, "") || "root"
+    };
   } catch {
-    return "unknown";
+    return { domain: "unknown", path: "root" };
   }
 }
 
-function textFromActivity(item) {
-  return `${item.title} ${item.normalizedUrl}`.toLowerCase();
+function normalizeDomain(url = "") {
+  return parseUrl(url).domain;
 }
 
 function tokenize(text) {
@@ -30,8 +34,55 @@ function tokenize(text) {
     .filter((token) => token.length > 2 && !STOPWORDS.has(token));
 }
 
+function domainTokens(domain) {
+  return domain.split(/[.-]/).filter((token) => token.length > 2);
+}
+
+function buildContextDocs(activities) {
+  const docs = activities.map((activity) => {
+    const parsed = parseUrl(activity.url);
+    const titleTokens = tokenize(activity.title || "");
+    const pathTokens = tokenize(parsed.path.replace(/[/-]/g, " "));
+    const baseTokens = [
+      ...titleTokens,
+      ...pathTokens,
+      ...domainTokens(parsed.domain),
+      `domain_${parsed.domain}`
+    ];
+
+    const bigrams = [];
+    for (let i = 0; i < Math.min(titleTokens.length - 1, 8); i += 1) {
+      bigrams.push(`bg_${titleTokens[i]}_${titleTokens[i + 1]}`);
+    }
+
+    return {
+      baseTokens: [...baseTokens, ...bigrams],
+      domain: parsed.domain,
+      timestamp: activity.timestamp
+    };
+  });
+
+  return docs.map((doc, idx) => {
+    const prev = docs[idx + 1];
+    const next = docs[idx - 1];
+    const context = [...doc.baseTokens];
+
+    if (prev) {
+      context.push(`prev_domain_${prev.domain}`);
+      context.push(`transition_${prev.domain}_to_${doc.domain}`);
+      context.push(...prev.baseTokens.slice(0, 4).map((token) => `prev_${token}`));
+    }
+    if (next) {
+      context.push(`next_domain_${next.domain}`);
+      context.push(...next.baseTokens.slice(0, 4).map((token) => `next_${token}`));
+    }
+
+    return context;
+  });
+}
+
 function buildTfIdfVectors(activities) {
-  const docs = activities.map((activity) => tokenize(textFromActivity(activity)));
+  const docs = buildContextDocs(activities);
   const vocab = [...new Set(docs.flat())];
   const termToIdx = Object.fromEntries(vocab.map((term, idx) => [term, idx]));
   const df = new Array(vocab.length).fill(0);
@@ -71,6 +122,28 @@ function cosine(a, b) {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
+function inferTopic(tokens) {
+  const counts = Object.fromEntries(Object.keys(TOPIC_LEXICON).map((topic) => [topic, 0]));
+  tokens.forEach((token) => {
+    Object.entries(TOPIC_LEXICON).forEach(([topic, words]) => {
+      if (words.includes(token)) counts[topic] += 1;
+    });
+  });
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return best && best[1] > 0 ? best[0] : "General";
+}
+
+function contextualSimilarity(i, j, activities, vectors, docs) {
+  const lexical = cosine(vectors[i], vectors[j]);
+  const domainA = normalizeDomain(activities[i].url);
+  const domainB = normalizeDomain(activities[j].url);
+  const domainBoost = domainA === domainB ? 0.18 : 0;
+  const topicBoost = inferTopic(docs[i]) === inferTopic(docs[j]) ? 0.15 : 0;
+  const delta = Math.abs((activities[i].timestamp || 0) - (activities[j].timestamp || 0));
+  const temporalBoost = Math.max(0, 1 - delta / (1000 * 60 * 25)) * 0.12;
+  return Math.min(1, lexical * 0.7 + domainBoost + topicBoost + temporalBoost);
+}
+
 function kmeans(vectors, k, maxIterations = 12) {
   const centroids = vectors.slice(0, k).map((v) => [...v]);
   const assignments = new Array(vectors.length).fill(0);
@@ -108,11 +181,8 @@ function kmeans(vectors, k, maxIterations = 12) {
 
 function agglomerative(vectors, k) {
   const clusters = vectors.map((_, idx) => [idx]);
-  const simCache = new Map();
 
   const avgLink = (a, b) => {
-    const key = `${a.join(",")}|${b.join(",")}`;
-    if (simCache.has(key)) return simCache.get(key);
     let total = 0;
     let cnt = 0;
     a.forEach((i) => {
@@ -121,9 +191,7 @@ function agglomerative(vectors, k) {
         cnt += 1;
       });
     });
-    const value = cnt ? total / cnt : 0;
-    simCache.set(key, value);
-    return value;
+    return cnt ? total / cnt : 0;
   };
 
   while (clusters.length > k) {
@@ -188,18 +256,7 @@ function topTerms(clusterVectors, vocab, count = 5) {
     .map((value, idx) => ({ term: vocab[idx], value }))
     .sort((a, b) => b.value - a.value)
     .slice(0, count)
-    .map((t) => t.term);
-}
-
-function inferTopic(tokens) {
-  const counts = Object.fromEntries(Object.keys(TOPIC_LEXICON).map((topic) => [topic, 0]));
-  tokens.forEach((token) => {
-    Object.entries(TOPIC_LEXICON).forEach(([topic, words]) => {
-      if (words.includes(token)) counts[topic] += 1;
-    });
-  });
-  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-  return best && best[1] > 0 ? best[0] : "General";
+    .map((t) => t.term.replace(/^(prev_|next_|domain_|bg_)/, ""));
 }
 
 function renderActivities(activities) {
@@ -239,7 +296,7 @@ function renderTopicGroups(activities, docs) {
     });
 }
 
-function renderClusters(activities, vectors, vocab, kmeansAssignments, agAssignments, k) {
+function renderClusters(vectors, vocab, kmeansAssignments, agAssignments, k) {
   const parent = document.querySelector("#clusters");
   parent.innerHTML = "";
 
@@ -269,13 +326,14 @@ function renderClusters(activities, vectors, vocab, kmeansAssignments, agAssignm
   });
 }
 
-function renderSimilarityGraph(activities, vectors, assignments) {
+function renderSimilarityGraph(activities, vectors, assignments, docs) {
   const canvas = document.querySelector("#graph");
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  const nodes = activities.slice(0, 18).map((activity, i) => {
-    const angle = (Math.PI * 2 * i) / Math.max(activities.length, 1);
+  const limit = Math.min(18, activities.length);
+  const nodes = activities.slice(0, limit).map((activity, i) => {
+    const angle = (Math.PI * 2 * i) / Math.max(limit, 1);
     const wobble = 12 * Math.sin(i * 1.7);
     const radius = 88 + (i % 4) * 13 + wobble;
     return {
@@ -290,10 +348,10 @@ function renderSimilarityGraph(activities, vectors, assignments) {
 
   for (let i = 0; i < nodes.length; i += 1) {
     for (let j = i + 1; j < nodes.length; j += 1) {
-      const sim = cosine(vectors[i], vectors[j]);
-      if (sim < 0.2) continue;
-      ctx.strokeStyle = `rgba(80,130,190,${Math.min(0.72, sim)})`;
-      ctx.lineWidth = 0.5 + sim * 2;
+      const sim = contextualSimilarity(i, j, activities, vectors, docs);
+      if (sim < 0.28) continue;
+      ctx.strokeStyle = `rgba(80,130,190,${Math.min(0.74, sim)})`;
+      ctx.lineWidth = 0.6 + sim * 2.2;
       ctx.beginPath();
       ctx.moveTo(nodes[i].x, nodes[i].y);
       ctx.lineTo(nodes[j].x, nodes[j].y);
@@ -349,7 +407,7 @@ function renderCorrelationMap(activities, docs) {
   const domains = [...new Set(activities.map((x) => normalizeDomain(x.url)))].slice(0, 7);
   const topics = Object.keys(TOPIC_LEXICON).slice(0, 6);
 
-  const matrix = topics.map((topic) => domains.map(() => 0));
+  const matrix = topics.map(() => domains.map(() => 0));
   activities.forEach((item, i) => {
     const domain = normalizeDomain(item.url);
     const dIdx = domains.indexOf(domain);
@@ -406,8 +464,8 @@ async function run() {
   const ag = agglomerative(vectors, autoK);
 
   renderTopicGroups(items, docs);
-  renderClusters(items, vectors, vocab, km, ag, autoK);
-  renderSimilarityGraph(items, vectors, km);
+  renderClusters(vectors, vocab, km, ag, autoK);
+  renderSimilarityGraph(items, vectors, km, docs);
   renderSiteGraph(items);
   renderCorrelationMap(items, docs);
 }

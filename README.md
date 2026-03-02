@@ -9,6 +9,7 @@ A Chrome extension that captures browsing activity and automatically analyzes it
   - K-Means
   - Agglomerative clustering
 - Auto-selects cluster count using an internal separation score.
+- Uses context-aware similarity (title/path/domain tokens, neighboring-page context, topic + time boosts).
 - Renders multiple visualizations:
   - Similarity network graph
   - Individual website activity graph
