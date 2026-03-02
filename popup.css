@@ -1,85 +1,121 @@
 :root {
-  color-scheme: light dark;
-  font-family: Inter, system-ui, sans-serif;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  color: #113355;
+  --bg: #eff6ff;
+  --card: #f8fbff;
+  --card-border: #bad7f5;
+  --accent: #6ea8fe;
+  --accent-2: #9ac8ff;
+  --text-soft: #3f5f7e;
 }
 
 body {
   margin: 0;
-  width: 600px;
+  width: 610px;
+  background: radial-gradient(circle at top right, #dceeff 0%, var(--bg) 55%, #eaf4ff 100%);
 }
 
 main {
   padding: 14px;
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
-h1, h2, p {
+header h1,
+h2,
+p {
   margin: 0;
 }
 
-.subtitle {
-  opacity: 0.75;
-  font-size: 0.9rem;
+.subtitle,
+.muted {
+  color: var(--text-soft);
+  font-size: 0.86rem;
+}
+
+.card {
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffffd9, var(--card));
+  box-shadow: 0 8px 18px #85b3e51f;
+  padding: 10px;
 }
 
 .controls {
   display: flex;
   gap: 10px;
-  align-items: flex-end;
+  align-items: end;
+  flex-wrap: wrap;
 }
 
 label {
   display: grid;
-  font-size: 0.85rem;
   gap: 4px;
+  font-size: 0.8rem;
 }
 
-input, button {
+input,
+select,
+button {
   font: inherit;
   padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid #9ec5ff;
+  background: #f5faff;
+  color: #143f66;
 }
 
 button {
   cursor: pointer;
+  background: linear-gradient(180deg, var(--accent), #5b9aff);
+  color: #fff;
+  border-color: #6ea8fe;
+}
+
+button:hover {
+  filter: brightness(1.05);
 }
 
 button.danger {
-  background: #8b2a2a;
-  color: white;
-  border: 0;
+  background: linear-gradient(180deg, #f498b8, #e77aa4);
+  border-color: #e77aa4;
 }
 
-#graph {
+canvas {
   width: 100%;
-  border: 1px solid #6664;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #ffffff22, #00000008);
+  border: 1px solid #c4ddf8;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f7fbff, #edf6ff);
 }
 
-#clusters {
+#clusters,
+#topicGroups {
   display: grid;
   gap: 8px;
 }
 
-.cluster-card {
-  border: 1px solid #6664;
-  border-radius: 8px;
+.cluster-card,
+.topic-card {
+  border: 1px solid #b5d7ff;
+  border-radius: 10px;
+  background: #f6fbff;
   padding: 8px;
 }
 
-.cluster-card h3 {
+.cluster-card h3,
+.topic-card h3 {
   margin: 0 0 6px;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
 }
 
 .cluster-card ul,
+.topic-card ul,
 #activityList {
   margin: 0;
-  padding-left: 20px;
+  padding-left: 18px;
 }
 
 #activityList li {
-  margin: 4px 0;
-  font-size: 0.85rem;
+  margin: 3px 0;
+  font-size: 0.83rem;
 }

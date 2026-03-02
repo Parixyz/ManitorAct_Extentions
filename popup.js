@@ -1,6 +1,23 @@
 const STOPWORDS = new Set([
-  "the", "and", "for", "with", "www", "http", "https", "com", "org", "net", "to", "of", "in", "on", "a", "an", "is"
+  "the", "and", "for", "with", "www", "http", "https", "com", "org", "net", "to", "of", "in", "on", "a", "an", "is", "home", "page"
 ]);
+
+const TOPIC_LEXICON = {
+  Entertainment: ["youtube", "netflix", "movie", "music", "spotify", "video", "anime", "game", "twitch", "disney"],
+  Learning: ["course", "tutorial", "docs", "learn", "education", "university", "wiki", "guide", "research"],
+  Work: ["jira", "slack", "teams", "notion", "confluence", "meeting", "calendar", "drive", "mail"],
+  Social: ["facebook", "instagram", "reddit", "x", "twitter", "linkedin", "chat", "community"],
+  Shopping: ["amazon", "cart", "shop", "deal", "price", "product", "store", "checkout"],
+  News: ["news", "times", "post", "breaking", "politics", "finance", "weather"]
+};
+
+function normalizeDomain(url = "") {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "unknown";
+  }
+}
 
 function textFromActivity(item) {
   return `${item.title} ${item.normalizedUrl}`.toLowerCase();
@@ -17,11 +34,10 @@ function buildTfIdfVectors(activities) {
   const docs = activities.map((activity) => tokenize(textFromActivity(activity)));
   const vocab = [...new Set(docs.flat())];
   const termToIdx = Object.fromEntries(vocab.map((term, idx) => [term, idx]));
-
   const df = new Array(vocab.length).fill(0);
+
   docs.forEach((doc) => {
-    const seen = new Set(doc);
-    seen.forEach((term) => {
+    new Set(doc).forEach((term) => {
       df[termToIdx[term]] += 1;
     });
   });
@@ -39,7 +55,7 @@ function buildTfIdfVectors(activities) {
     });
   });
 
-  return { vectors, vocab };
+  return { vectors, vocab, docs };
 }
 
 function cosine(a, b) {
@@ -75,24 +91,92 @@ function kmeans(vectors, k, maxIterations = 12) {
 
     const sums = Array.from({ length: k }, () => new Array(vectors[0].length).fill(0));
     const counts = new Array(k).fill(0);
-
     for (let i = 0; i < vectors.length; i += 1) {
       const cluster = assignments[i];
       counts[cluster] += 1;
-      for (let d = 0; d < vectors[i].length; d += 1) {
-        sums[cluster][d] += vectors[i][d];
-      }
+      for (let d = 0; d < vectors[i].length; d += 1) sums[cluster][d] += vectors[i][d];
     }
 
     for (let j = 0; j < k; j += 1) {
       if (!counts[j]) continue;
-      for (let d = 0; d < sums[j].length; d += 1) {
-        centroids[j][d] = sums[j][d] / counts[j];
-      }
+      for (let d = 0; d < sums[j].length; d += 1) centroids[j][d] = sums[j][d] / counts[j];
     }
   }
 
   return assignments;
+}
+
+function agglomerative(vectors, k) {
+  const clusters = vectors.map((_, idx) => [idx]);
+  const simCache = new Map();
+
+  const avgLink = (a, b) => {
+    const key = `${a.join(",")}|${b.join(",")}`;
+    if (simCache.has(key)) return simCache.get(key);
+    let total = 0;
+    let cnt = 0;
+    a.forEach((i) => {
+      b.forEach((j) => {
+        total += cosine(vectors[i], vectors[j]);
+        cnt += 1;
+      });
+    });
+    const value = cnt ? total / cnt : 0;
+    simCache.set(key, value);
+    return value;
+  };
+
+  while (clusters.length > k) {
+    let best = { i: 0, j: 1, score: -1 };
+    for (let i = 0; i < clusters.length; i += 1) {
+      for (let j = i + 1; j < clusters.length; j += 1) {
+        const score = avgLink(clusters[i], clusters[j]);
+        if (score > best.score) best = { i, j, score };
+      }
+    }
+    clusters[best.i] = [...clusters[best.i], ...clusters[best.j]];
+    clusters.splice(best.j, 1);
+  }
+
+  const assignments = new Array(vectors.length).fill(0);
+  clusters.forEach((cluster, idx) => cluster.forEach((point) => {
+    assignments[point] = idx;
+  }));
+  return assignments;
+}
+
+function chooseBestK(vectors, maxK) {
+  const upper = Math.max(2, Math.min(maxK, Math.min(8, vectors.length)));
+  let bestK = 2;
+  let bestScore = -Infinity;
+
+  for (let k = 2; k <= upper; k += 1) {
+    const assignments = kmeans(vectors, k, 8);
+    let intra = 0;
+    let inter = 0;
+    let intraCount = 0;
+    let interCount = 0;
+
+    for (let i = 0; i < vectors.length; i += 1) {
+      for (let j = i + 1; j < vectors.length; j += 1) {
+        const sim = cosine(vectors[i], vectors[j]);
+        if (assignments[i] === assignments[j]) {
+          intra += sim;
+          intraCount += 1;
+        } else {
+          inter += sim;
+          interCount += 1;
+        }
+      }
+    }
+
+    const score = (intra / Math.max(intraCount, 1)) - (inter / Math.max(interCount, 1));
+    if (score > bestScore) {
+      bestScore = score;
+      bestK = k;
+    }
+  }
+  return bestK;
 }
 
 function topTerms(clusterVectors, vocab, count = 5) {
@@ -107,70 +191,109 @@ function topTerms(clusterVectors, vocab, count = 5) {
     .map((t) => t.term);
 }
 
+function inferTopic(tokens) {
+  const counts = Object.fromEntries(Object.keys(TOPIC_LEXICON).map((topic) => [topic, 0]));
+  tokens.forEach((token) => {
+    Object.entries(TOPIC_LEXICON).forEach(([topic, words]) => {
+      if (words.includes(token)) counts[topic] += 1;
+    });
+  });
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return best && best[1] > 0 ? best[0] : "General";
+}
+
 function renderActivities(activities) {
   const list = document.querySelector("#activityList");
   list.innerHTML = "";
-  activities.slice(0, 20).forEach((item) => {
+  activities.slice(0, 25).forEach((item) => {
     const li = document.createElement("li");
     li.textContent = `${new Date(item.timestamp).toLocaleTimeString()} — ${item.title}`;
     list.appendChild(li);
   });
 }
 
-function renderClusters(activities, vectors, vocab, assignments, k) {
+function renderTopicGroups(activities, docs) {
+  const groups = {};
+  activities.forEach((activity, idx) => {
+    const topic = inferTopic(docs[idx]);
+    if (!groups[topic]) groups[topic] = [];
+    groups[topic].push(activity);
+  });
+
+  const parent = document.querySelector("#topicGroups");
+  parent.innerHTML = "";
+  Object.entries(groups)
+    .sort((a, b) => b[1].length - a[1].length)
+    .forEach(([topic, items]) => {
+      const card = document.createElement("article");
+      card.className = "topic-card";
+      card.innerHTML = `<h3>${topic} (${items.length})</h3>`;
+      const ul = document.createElement("ul");
+      items.slice(0, 5).forEach((x) => {
+        const li = document.createElement("li");
+        li.textContent = x.title;
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+      parent.appendChild(card);
+    });
+}
+
+function renderClusters(activities, vectors, vocab, kmeansAssignments, agAssignments, k) {
   const parent = document.querySelector("#clusters");
   parent.innerHTML = "";
 
-  for (let cluster = 0; cluster < k; cluster += 1) {
-    const indices = assignments
-      .map((assigned, idx) => (assigned === cluster ? idx : -1))
-      .filter((idx) => idx !== -1);
+  const methods = [
+    { name: "K-Means", assignments: kmeansAssignments },
+    { name: "Agglomerative", assignments: agAssignments }
+  ];
 
-    if (!indices.length) continue;
-
+  methods.forEach((method) => {
     const card = document.createElement("article");
     card.className = "cluster-card";
-
-    const heading = document.createElement("h3");
-    const clusterTerms = topTerms(indices.map((idx) => vectors[idx]), vocab);
-    heading.textContent = `Cluster ${cluster + 1} (${indices.length}) • ${clusterTerms.join(", ")}`;
-    card.appendChild(heading);
+    const title = document.createElement("h3");
+    title.textContent = `${method.name} (${k} clusters)`;
+    card.appendChild(title);
 
     const ul = document.createElement("ul");
-    indices.slice(0, 6).forEach((idx) => {
+    for (let cluster = 0; cluster < k; cluster += 1) {
+      const idxs = method.assignments.map((v, i) => (v === cluster ? i : -1)).filter((i) => i >= 0);
+      if (!idxs.length) continue;
+      const terms = topTerms(idxs.map((idx) => vectors[idx]), vocab, 3).join(", ");
       const li = document.createElement("li");
-      li.textContent = activities[idx].title;
+      li.textContent = `Cluster ${cluster + 1}: ${idxs.length} items • ${terms}`;
       ul.appendChild(li);
-    });
+    }
     card.appendChild(ul);
     parent.appendChild(card);
-  }
+  });
 }
 
-function renderGraph(activities, vectors, assignments) {
+function renderSimilarityGraph(activities, vectors, assignments) {
   const canvas = document.querySelector("#graph");
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  const nodes = activities.slice(0, 16).map((activity, i) => {
+  const nodes = activities.slice(0, 18).map((activity, i) => {
     const angle = (Math.PI * 2 * i) / Math.max(activities.length, 1);
-    const radius = 90 + (i % 3) * 18;
+    const wobble = 12 * Math.sin(i * 1.7);
+    const radius = 88 + (i % 4) * 13 + wobble;
     return {
-      label: activity.title.slice(0, 22),
+      label: normalizeDomain(activity.url).slice(0, 18),
       x: canvas.width / 2 + Math.cos(angle) * radius,
       y: canvas.height / 2 + Math.sin(angle) * radius,
       cluster: assignments[i] ?? 0
     };
   });
 
-  const palette = ["#2b8a3e", "#1c7ed6", "#a61e4d", "#e67700", "#5f3dc4", "#087f5b", "#c2255c", "#495057"];
+  const palette = ["#7db6ff", "#9fd0ff", "#b2e2ff", "#8ec5ff", "#78b0f0", "#9bc8ea", "#a8d5ff", "#84c0e8"];
 
   for (let i = 0; i < nodes.length; i += 1) {
     for (let j = i + 1; j < nodes.length; j += 1) {
       const sim = cosine(vectors[i], vectors[j]);
-      if (sim < 0.22) continue;
-      ctx.strokeStyle = `rgba(70,70,70,${Math.min(sim, 0.6)})`;
-      ctx.lineWidth = 1 + sim;
+      if (sim < 0.2) continue;
+      ctx.strokeStyle = `rgba(80,130,190,${Math.min(0.72, sim)})`;
+      ctx.lineWidth = 0.5 + sim * 2;
       ctx.beginPath();
       ctx.moveTo(nodes[i].x, nodes[i].y);
       ctx.lineTo(nodes[j].x, nodes[j].y);
@@ -179,38 +302,118 @@ function renderGraph(activities, vectors, assignments) {
   }
 
   nodes.forEach((node) => {
-    const color = palette[node.cluster % palette.length];
-    ctx.fillStyle = color;
+    ctx.fillStyle = palette[node.cluster % palette.length];
     ctx.beginPath();
     ctx.arc(node.x, node.y, 8, 0, Math.PI * 2);
     ctx.fill();
-
-    ctx.fillStyle = "#111";
+    ctx.fillStyle = "#1b486f";
     ctx.font = "10px sans-serif";
-    ctx.fillText(node.label, node.x + 10, node.y + 3);
+    ctx.fillText(node.label, node.x + 9, node.y + 4);
+  });
+}
+
+function renderSiteGraph(activities) {
+  const canvas = document.querySelector("#siteGraph");
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const domainCounts = {};
+  activities.forEach((item) => {
+    const domain = normalizeDomain(item.url);
+    domainCounts[domain] = (domainCounts[domain] || 0) + 1;
+  });
+
+  const entries = Object.entries(domainCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const maxVal = Math.max(...entries.map((e) => e[1]), 1);
+  const barW = 52;
+  const gap = 14;
+
+  entries.forEach(([domain, value], idx) => {
+    const x = 26 + idx * (barW + gap);
+    const h = (value / maxVal) * 140;
+    const y = canvas.height - 38 - h;
+    ctx.fillStyle = "#97c8ff";
+    ctx.fillRect(x, y, barW, h);
+    ctx.fillStyle = "#245784";
+    ctx.font = "10px sans-serif";
+    ctx.fillText(String(value), x + 18, y - 4);
+    ctx.fillText(domain.slice(0, 9), x, canvas.height - 18);
+  });
+}
+
+function renderCorrelationMap(activities, docs) {
+  const canvas = document.querySelector("#correlationMap");
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const domains = [...new Set(activities.map((x) => normalizeDomain(x.url)))].slice(0, 7);
+  const topics = Object.keys(TOPIC_LEXICON).slice(0, 6);
+
+  const matrix = topics.map((topic) => domains.map(() => 0));
+  activities.forEach((item, i) => {
+    const domain = normalizeDomain(item.url);
+    const dIdx = domains.indexOf(domain);
+    if (dIdx === -1) return;
+    const topic = inferTopic(docs[i]);
+    const tIdx = topics.indexOf(topic);
+    if (tIdx >= 0) matrix[tIdx][dIdx] += 1;
+  });
+
+  const maxV = Math.max(...matrix.flat(), 1);
+  const cellW = 70;
+  const cellH = 26;
+
+  topics.forEach((topic, r) => {
+    ctx.fillStyle = "#2a5b87";
+    ctx.font = "11px sans-serif";
+    ctx.fillText(topic.slice(0, 11), 8, 34 + r * cellH);
+    domains.forEach((domain, c) => {
+      const val = matrix[r][c];
+      const alpha = val / maxV;
+      ctx.fillStyle = `rgba(102,170,238,${Math.max(0.08, alpha)})`;
+      ctx.fillRect(130 + c * cellW, 16 + r * cellH, cellW - 4, cellH - 4);
+      ctx.fillStyle = "#173f63";
+      ctx.font = "10px sans-serif";
+      ctx.fillText(String(val), 157 + c * cellW, 33 + r * cellH);
+    });
+  });
+
+  domains.forEach((domain, c) => {
+    ctx.fillStyle = "#2a5b87";
+    ctx.font = "10px sans-serif";
+    ctx.fillText(domain.slice(0, 9), 132 + c * cellW, 12);
   });
 }
 
 async function run() {
   const { activities = [] } = await chrome.storage.local.get("activities");
-  const items = activities.slice(0, 60);
-  renderActivities(items);
+  const windowSize = Number(document.querySelector("#timeWindow").value) || 60;
+  const items = activities.slice(0, windowSize);
 
-  if (items.length < 2) {
-    document.querySelector("#clusters").innerHTML = "<p>Need more browsing activity to cluster.</p>";
+  renderActivities(items);
+  if (items.length < 3) {
+    ["#topicGroups", "#clusters"].forEach((selector) => {
+      document.querySelector(selector).innerHTML = "<p class='muted'>Need more browsing activity to analyze.</p>";
+    });
     return;
   }
 
-  const { vectors, vocab } = buildTfIdfVectors(items);
-  const requestedK = Number(document.querySelector("#clusterCount").value) || 3;
-  const k = Math.max(2, Math.min(requestedK, Math.min(8, items.length)));
-  const assignments = kmeans(vectors, k);
+  const { vectors, vocab, docs } = buildTfIdfVectors(items);
+  const maxRequested = Number(document.querySelector("#clusterCount").value) || 5;
+  const autoK = chooseBestK(vectors, maxRequested);
 
-  renderClusters(items, vectors, vocab, assignments, k);
-  renderGraph(items, vectors, assignments);
+  const km = kmeans(vectors, autoK);
+  const ag = agglomerative(vectors, autoK);
+
+  renderTopicGroups(items, docs);
+  renderClusters(items, vectors, vocab, km, ag, autoK);
+  renderSimilarityGraph(items, vectors, km);
+  renderSiteGraph(items);
+  renderCorrelationMap(items, docs);
 }
 
 document.querySelector("#runCluster").addEventListener("click", run);
+document.querySelector("#timeWindow").addEventListener("change", run);
 document.querySelector("#clearData").addEventListener("click", async () => {
   await chrome.storage.local.set({ activities: [] });
   await run();

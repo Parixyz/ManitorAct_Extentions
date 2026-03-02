@@ -1,20 +1,24 @@
-# Activity Cluster Graph (Chrome Extension)
+# Activity Intelligence (Chrome Extension)
 
-This extension tracks your active tabs, lists browsing activity, applies lightweight NLP clustering, and visualizes similarity as a graph.
+A Chrome extension that captures browsing activity and automatically analyzes it with NLP.
 
-## Features
-- Captures tab activity (title, URL, timestamp).
-- Lists recent activity in the popup.
-- Uses tokenization + TF-IDF vectors for NLP features.
-- Runs k-means clustering in-browser.
-- Draws an activity similarity graph on a canvas.
+## What it now does
+- Tracks active tab events and stores local activity data.
+- Automatically infers **NLP topics** (e.g., Entertainment, Learning, Work, Social, Shopping, News).
+- Runs **multiple clustering methods** automatically:
+  - K-Means
+  - Agglomerative clustering
+- Auto-selects cluster count using an internal separation score.
+- Renders multiple visualizations:
+  - Similarity network graph
+  - Individual website activity graph
+  - Correlation map (topic vs website)
 
-## Load in Chrome
+## Install (unpacked)
 1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
+2. Enable Developer mode.
 3. Click **Load unpacked**.
 4. Select this folder.
 
-## Notes
-- Data is stored in `chrome.storage.local`.
-- Use the **Clear** button to erase stored activity.
+## Data
+All activity data stays in `chrome.storage.local` and can be removed from the popup using **Clear data**.
