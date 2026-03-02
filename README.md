@@ -1,9 +1,10 @@
 # Activity Intelligence (Chrome Extension)
 
-A Chrome extension that captures browsing activity and automatically analyzes it with adaptive NLP.
+A Chrome extension that captures browsing activity and analyzes it with adaptive NLP + semantic similarity.
 
 ## What it now does
-- Tracks active tab events and stores local activity data.
+- Captures tab activity in the background and stores local history.
+- Extracts readable on-page text (`contentSnippet`) via a content script for stronger semantic analysis.
 - Classifies activity into:
   - Work
   - Personal Project
@@ -12,20 +13,18 @@ A Chrome extension that captures browsing activity and automatically analyzes it
   - Course Work
   - Entertainment
   - Personal
-- Uses richer NLP/context features (title/path/domain tokens, bigrams, previous/next page context, transition features).
+  - Other
+- Includes explicit domain logic, including:
+  - `1p02` => Teaching Assistant
+  - UAV/mobile + course context => Course Work
+  - UAV/mobile without course context => Research
 - Uses a hybrid classifier:
-  - Heuristic weak labeling rules (including `1p02` => Teaching Assistant)
-  - Multinomial Naive Bayes
+  - heuristic weak labeling
+  - multinomial Naive Bayes
   - kNN agreement layer
-- Allows user correction from a classification timeline and learns over time via saved labels.
-- Runs multiple clustering methods automatically:
-  - K-Means
-  - Agglomerative clustering
-- Auto-selects cluster count using an internal separation score.
-- Renders multiple visualizations:
-  - Similarity network graph
-  - Individual website activity graph
-  - Correlation map (class vs website)
+- Supports user correction and stores labels in `chrome.storage.local` so predictions improve over time.
+- Builds similarity graph from semantic signals (content + class + lexical), and forces same normalized URL to max similarity.
+- Runs K-Means + Agglomerative clustering with auto-k selection.
 
 ## Install (unpacked)
 1. Open `chrome://extensions`.
@@ -34,4 +33,4 @@ A Chrome extension that captures browsing activity and automatically analyzes it
 4. Select this folder.
 
 ## Data
-All activity data and corrections stay in `chrome.storage.local` and can be removed with **Clear data**.
+All activity/content snippets and user corrections remain local in `chrome.storage.local` and can be cleared with **Clear data**.

@@ -1,31 +1,22 @@
-const STOPWORDS = new Set([
-  "the", "and", "for", "with", "www", "http", "https", "com", "org", "net", "to", "of", "in", "on", "a", "an", "is", "home", "page"
-]);
+const STOPWORDS = new Set(["the", "and", "for", "with", "www", "http", "https", "com", "org", "net", "to", "of", "in", "on", "a", "an", "is", "home", "page"]);
 
-const CLASS_LABELS = [
-  "Work",
-  "Personal Project",
-  "Research",
-  "Teaching Assistant",
-  "Course Work",
-  "Entertainment",
-  "Personal"
-];
+const CLASS_LABELS = ["Work", "Personal Project", "Research", "Teaching Assistant", "Course Work", "Entertainment", "Personal", "Other"];
 
-const TOPIC_LEXICON = {
-  Entertainment: ["youtube", "netflix", "movie", "music", "spotify", "video", "anime", "game", "twitch", "disney"],
-  Research: ["uav", "drone", "mobile", "paper", "arxiv", "experiment", "dataset", "survey", "benchmark", "lab"],
-  "Teaching Assistant": ["1p02", "ta", "grading", "office", "hours", "rubric", "tutorial", "student", "moodle"],
-  "Course Work": ["assignment", "lecture", "quiz", "course", "syllabus", "midterm", "final", "lab", "class"],
-  Work: ["jira", "slack", "teams", "notion", "confluence", "meeting", "calendar", "drive", "mail"],
-  "Personal Project": ["github", "repo", "prototype", "build", "deploy", "feature", "debug"],
-  Personal: ["shopping", "amazon", "cart", "reddit", "instagram", "facebook"]
+const CLASS_TERMS = {
+  Work: ["jira", "slack", "meeting", "client", "sprint", "calendar", "mail", "docs", "confluence"],
+  "Personal Project": ["github", "repo", "feature", "build", "prototype", "debug", "deploy", "sideproject"],
+  Research: ["uav", "drone", "mobile", "paper", "arxiv", "study", "dataset", "experiment", "method"],
+  "Teaching Assistant": ["1p02", "ta", "grading", "office", "hours", "rubric", "student", "tutorial", "moodle"],
+  "Course Work": ["assignment", "lecture", "quiz", "course", "syllabus", "midterm", "final", "homework", "lab"],
+  Entertainment: ["youtube", "netflix", "movie", "music", "video", "stream", "twitch", "watch"],
+  Personal: ["shopping", "amazon", "reddit", "instagram", "facebook", "travel", "food"],
+  Other: []
 };
 
 function parseUrl(url = "") {
   try {
-    const parsed = new URL(url);
-    return { domain: parsed.hostname.replace(/^www\./, ""), path: parsed.pathname.replace(/^\//, "") || "root" };
+    const u = new URL(url);
+    return { domain: u.hostname.replace(/^www\./, ""), path: u.pathname.replace(/^\//, "") || "root" };
   } catch {
     return { domain: "unknown", path: "root" };
   }
@@ -35,58 +26,44 @@ function tokenize(text) {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((t) => t.length > 2 && !STOPWORDS.has(t));
 }
 
-function domainTokens(domain) {
-  return domain.split(/[.-]/).filter((token) => token.length > 2);
-}
-
-function buildContextDocs(activities) {
-  const docs = activities.map((activity) => {
-    const parsed = parseUrl(activity.url);
-    const titleTokens = tokenize(activity.title || "");
-    const pathTokens = tokenize(parsed.path.replace(/[/-]/g, " "));
-    const baseTokens = [...titleTokens, ...pathTokens, ...domainTokens(parsed.domain), `domain_${parsed.domain}`];
-
+function buildDocs(activities) {
+  const basic = activities.map((a) => {
+    const { domain, path } = parseUrl(a.url);
+    const title = tokenize(a.title || "");
+    const pathTokens = tokenize(path.replace(/[/-]/g, " "));
+    const content = tokenize(a.contentSnippet || "");
+    const tokens = [...title, ...pathTokens, ...domain.split(/[.-]/), ...content.slice(0, 120), `domain_${domain}`].filter(Boolean);
     const bigrams = [];
-    for (let i = 0; i < Math.min(titleTokens.length - 1, 10); i += 1) {
-      bigrams.push(`bg_${titleTokens[i]}_${titleTokens[i + 1]}`);
-    }
-
-    return { tokens: [...baseTokens, ...bigrams], domain: parsed.domain };
+    for (let i = 0; i < Math.min(tokens.length - 1, 20); i += 1) bigrams.push(`bg_${tokens[i]}_${tokens[i + 1]}`);
+    return { tokens: [...tokens, ...bigrams], domain };
   });
 
-  return docs.map((doc, idx) => {
-    const prev = docs[idx + 1];
-    const next = docs[idx - 1];
-    const out = [...doc.tokens];
-    if (prev) {
-      out.push(`prev_domain_${prev.domain}`);
-      out.push(`transition_${prev.domain}_to_${doc.domain}`);
-      out.push(...prev.tokens.slice(0, 5).map((x) => `prev_${x}`));
-    }
-    if (next) {
-      out.push(`next_domain_${next.domain}`);
-      out.push(...next.tokens.slice(0, 5).map((x) => `next_${x}`));
-    }
-    return out;
+  return basic.map((doc, idx) => {
+    const prev = basic[idx + 1];
+    const next = basic[idx - 1];
+    return [
+      ...doc.tokens,
+      ...(prev ? [`prev_domain_${prev.domain}`, ...prev.tokens.slice(0, 8).map((x) => `prev_${x}`)] : []),
+      ...(next ? [`next_domain_${next.domain}`, ...next.tokens.slice(0, 8).map((x) => `next_${x}`)] : [])
+    ];
   });
 }
 
 function buildTfIdfVectors(activities) {
-  const docs = buildContextDocs(activities);
+  const docs = buildDocs(activities);
   const vocab = [...new Set(docs.flat())];
-  const termToIdx = Object.fromEntries(vocab.map((term, idx) => [term, idx]));
+  const index = Object.fromEntries(vocab.map((t, i) => [t, i]));
   const df = new Array(vocab.length).fill(0);
-
-  docs.forEach((doc) => new Set(doc).forEach((term) => { df[termToIdx[term]] += 1; }));
+  docs.forEach((doc) => new Set(doc).forEach((t) => { df[index[t]] += 1; }));
 
   const vectors = docs.map((doc) => {
     const counts = new Array(vocab.length).fill(0);
-    doc.forEach((term) => { counts[termToIdx[term]] += 1; });
-    const total = Math.max(doc.length, 1);
-    return counts.map((count, idx) => (count / total) * (Math.log((docs.length + 1) / (df[idx] + 1)) + 1));
+    doc.forEach((t) => { counts[index[t]] += 1; });
+    const total = Math.max(1, doc.length);
+    return counts.map((c, i) => (c / total) * (Math.log((docs.length + 1) / (df[i] + 1)) + 1));
   });
 
-  return { vectors, vocab, docs };
+  return { docs, vectors, vocab };
 }
 
 function cosine(a, b) {
@@ -95,140 +72,123 @@ function cosine(a, b) {
   return !na || !nb ? 0 : dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-function heuristicLabel(activity, tokens) {
-  const text = `${activity.title || ""} ${activity.url || ""}`.toLowerCase();
-  if (text.includes("1p02") || tokens.includes("1p02")) return "Teaching Assistant";
-  if (tokens.some((t) => ["youtube", "watch", "video", "music"].includes(t))) return "Entertainment";
-
-  const hasResearch = tokens.some((t) => ["uav", "drone", "mobile", "paper", "arxiv", "dataset", "experiment"].includes(t));
-  const hasCourse = tokens.some((t) => ["assignment", "lecture", "quiz", "course", "midterm", "final"].includes(t));
-  if (hasResearch && hasCourse) return "Course Work";
-  if (hasResearch) return "Research";
-  if (hasCourse) return "Course Work";
-  if (tokens.some((t) => TOPIC_LEXICON.Work.includes(t))) return "Work";
-  if (tokens.some((t) => TOPIC_LEXICON["Personal Project"].includes(t))) return "Personal Project";
-  return "Personal";
+function termVector(tokensByClass) {
+  return CLASS_LABELS.map((label) => tokensByClass.reduce((acc, token) => acc + (CLASS_TERMS[label].includes(token) ? 1 : 0), 0));
 }
 
-function trainNaiveBayes(labeledDocs) {
-  const model = { classCounts: {}, tokenCounts: {}, totalTokens: {}, vocabulary: new Set() };
-  CLASS_LABELS.forEach((c) => {
-    model.classCounts[c] = 0; model.tokenCounts[c] = {}; model.totalTokens[c] = 0;
-  });
+function heuristicLabel(activity, tokens) {
+  const text = `${activity.title || ""} ${activity.url || ""} ${activity.contentSnippet || ""}`.toLowerCase();
+  if (text.includes("1p02")) return "Teaching Assistant";
+  const hasUavMobile = /\b(uav|drone|mobile)\b/.test(text);
+  const hasCourse = /\b(course|assignment|lecture|quiz|midterm|final|lab)\b/.test(text);
+  if (hasUavMobile && hasCourse) return "Course Work";
+  if (hasUavMobile) return "Research";
+  if (/\b(youtube|netflix|watch|video|music)\b/.test(text)) return "Entertainment";
+  if (/\b(ta|grading|rubric|moodle|office hours|student)\b/.test(text)) return "Teaching Assistant";
+  if (/\b(jira|slack|meeting|confluence|calendar)\b/.test(text)) return "Work";
+  if (/\b(github|repo|deploy|prototype|feature)\b/.test(text)) return "Personal Project";
+  if (/\b(course|assignment|lecture|quiz)\b/.test(text)) return "Course Work";
+  return "Other";
+}
 
-  labeledDocs.forEach(({ label, tokens }) => {
+function trainNaiveBayes(rows) {
+  const model = { classCounts: {}, tokenCounts: {}, totals: {}, vocab: new Set() };
+  CLASS_LABELS.forEach((c) => { model.classCounts[c] = 0; model.tokenCounts[c] = {}; model.totals[c] = 0; });
+  rows.forEach(({ label, tokens }) => {
     model.classCounts[label] += 1;
-    tokens.forEach((token) => {
-      model.vocabulary.add(token);
-      model.tokenCounts[label][token] = (model.tokenCounts[label][token] || 0) + 1;
-      model.totalTokens[label] += 1;
+    tokens.forEach((t) => {
+      model.vocab.add(t);
+      model.tokenCounts[label][t] = (model.tokenCounts[label][t] || 0) + 1;
+      model.totals[label] += 1;
     });
   });
-
   return model;
 }
 
 function predictNaiveBayes(model, tokens) {
-  const vocabSize = Math.max(model.vocabulary.size, 1);
-  let bestLabel = "Personal";
-  let bestScore = -Infinity;
+  const vocabSize = Math.max(1, model.vocab.size);
+  let best = { label: "Other", score: -Infinity };
+  const totalClasses = Object.values(model.classCounts).reduce((a, b) => a + b, 0) + CLASS_LABELS.length;
 
   CLASS_LABELS.forEach((label) => {
-    const classPrior = (model.classCounts[label] + 1) / (Object.values(model.classCounts).reduce((a, b) => a + b, 0) + CLASS_LABELS.length);
-    let score = Math.log(classPrior);
-
-    tokens.forEach((token) => {
-      const num = (model.tokenCounts[label][token] || 0) + 1;
-      const den = model.totalTokens[label] + vocabSize;
-      score += Math.log(num / den);
+    let score = Math.log((model.classCounts[label] + 1) / totalClasses);
+    tokens.forEach((t) => {
+      score += Math.log(((model.tokenCounts[label][t] || 0) + 1) / (model.totals[label] + vocabSize));
     });
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestLabel = label;
-    }
+    if (score > best.score) best = { label, score };
   });
 
-  return { label: bestLabel, score: bestScore };
+  return best.label;
 }
 
-function knnLabel(doc, labeledDocs, k = 5) {
-  if (!labeledDocs.length) return null;
-  const setDoc = new Set(doc);
-  const scored = labeledDocs.map((row) => {
-    const setRow = new Set(row.tokens);
-    let overlap = 0;
-    setDoc.forEach((t) => { if (setRow.has(t)) overlap += 1; });
-    const sim = overlap / Math.sqrt(setDoc.size * setRow.size || 1);
-    return { label: row.label, sim };
+function knnLabel(targetTokens, labeledRows, k = 5) {
+  const setA = new Set(targetTokens);
+  const ranked = labeledRows.map((row) => {
+    const setB = new Set(row.tokens);
+    let common = 0;
+    setA.forEach((t) => { if (setB.has(t)) common += 1; });
+    return { label: row.label, sim: common / Math.sqrt(Math.max(1, setA.size * setB.size)) };
   }).sort((a, b) => b.sim - a.sim).slice(0, k);
-
   const votes = {};
-  scored.forEach((s) => { votes[s.label] = (votes[s.label] || 0) + s.sim; });
+  ranked.forEach((r) => { votes[r.label] = (votes[r.label] || 0) + r.sim; });
   return Object.entries(votes).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 }
 
 function classifyActivities(activities, docs, userLabels) {
-  const supervised = [];
-  activities.forEach((a, i) => {
-    const manual = userLabels[a.id];
-    if (manual) supervised.push({ label: manual, tokens: docs[i] });
-  });
-
-  activities.forEach((a, i) => {
-    if (!userLabels[a.id]) supervised.push({ label: heuristicLabel(a, docs[i]), tokens: docs[i] });
-  });
-
-  const model = trainNaiveBayes(supervised);
+  const rows = [];
+  activities.forEach((a, i) => rows.push({ label: userLabels[a.id] || heuristicLabel(a, docs[i]), tokens: docs[i] }));
+  const model = trainNaiveBayes(rows);
 
   return activities.map((a, i) => {
-    const manual = userLabels[a.id];
-    if (manual) return manual;
-    const nb = predictNaiveBayes(model, docs[i]).label;
-    const knn = knnLabel(docs[i], supervised, 5);
-    if (knn && knn === nb) return nb;
-    return nb;
+    if (userLabels[a.id]) return userLabels[a.id];
+    const nb = predictNaiveBayes(model, docs[i]);
+    const knn = knnLabel(docs[i], rows, 5);
+    return knn && knn === nb ? nb : nb;
   });
 }
 
-function contextualSimilarity(i, j, activities, vectors, labels) {
+function semanticSimilarity(i, j, activities, vectors, docs, labels) {
+  const urlA = parseUrl(activities[i].url);
+  const urlB = parseUrl(activities[j].url);
+  if (activities[i].normalizedUrl && activities[i].normalizedUrl === activities[j].normalizedUrl) return 1;
   const lexical = cosine(vectors[i], vectors[j]);
-  const domainBoost = parseUrl(activities[i].url).domain === parseUrl(activities[j].url).domain ? 0.2 : 0;
-  const classBoost = labels[i] === labels[j] ? 0.2 : 0;
-  const delta = Math.abs((activities[i].timestamp || 0) - (activities[j].timestamp || 0));
-  const temporalBoost = Math.max(0, 1 - delta / (1000 * 60 * 25)) * 0.12;
-  return Math.min(1, lexical * 0.62 + domainBoost + classBoost + temporalBoost);
+  const classSim = labels[i] === labels[j] ? 1 : 0;
+  const semA = termVector(docs[i]);
+  const semB = termVector(docs[j]);
+  const termSim = cosine(semA, semB);
+  const sameDomainBoost = urlA.domain === urlB.domain ? 0.3 : 0;
+  return Math.min(1, lexical * 0.5 + termSim * 0.35 + classSim * 0.15 + sameDomainBoost);
 }
 
-function kmeans(vectors, k, maxIterations = 12) {
+function kmeans(vectors, k, iterations = 10) {
   const centroids = vectors.slice(0, k).map((v) => [...v]);
-  const assignments = new Array(vectors.length).fill(0);
-  for (let iter = 0; iter < maxIterations; iter += 1) {
+  const assign = new Array(vectors.length).fill(0);
+  for (let it = 0; it < iterations; it += 1) {
     for (let i = 0; i < vectors.length; i += 1) {
-      let bestIdx = 0; let bestScore = -1;
-      for (let j = 0; j < centroids.length; j += 1) {
-        const score = cosine(vectors[i], centroids[j]);
-        if (score > bestScore) { bestScore = score; bestIdx = j; }
+      let best = 0; let bestS = -1;
+      for (let c = 0; c < k; c += 1) {
+        const s = cosine(vectors[i], centroids[c]);
+        if (s > bestS) { bestS = s; best = c; }
       }
-      assignments[i] = bestIdx;
+      assign[i] = best;
     }
     const sums = Array.from({ length: k }, () => new Array(vectors[0].length).fill(0));
     const counts = new Array(k).fill(0);
     for (let i = 0; i < vectors.length; i += 1) {
-      const c = assignments[i]; counts[c] += 1;
+      const c = assign[i]; counts[c] += 1;
       for (let d = 0; d < vectors[i].length; d += 1) sums[c][d] += vectors[i][d];
     }
-    for (let j = 0; j < k; j += 1) if (counts[j]) for (let d = 0; d < sums[j].length; d += 1) centroids[j][d] = sums[j][d] / counts[j];
+    for (let c = 0; c < k; c += 1) if (counts[c]) for (let d = 0; d < sums[c].length; d += 1) centroids[c][d] = sums[c][d] / counts[c];
   }
-  return assignments;
+  return assign;
 }
 
 function agglomerative(vectors, k) {
-  const clusters = vectors.map((_, idx) => [idx]);
+  const clusters = vectors.map((_, i) => [i]);
   const avg = (a, b) => {
-    let total = 0; let cnt = 0;
-    a.forEach((i) => b.forEach((j) => { total += cosine(vectors[i], vectors[j]); cnt += 1; }));
-    return cnt ? total / cnt : 0;
+    let s = 0; let n = 0;
+    a.forEach((i) => b.forEach((j) => { s += cosine(vectors[i], vectors[j]); n += 1; }));
+    return n ? s / n : 0;
   };
   while (clusters.length > k) {
     let best = { i: 0, j: 1, s: -1 };
@@ -246,125 +206,116 @@ function agglomerative(vectors, k) {
 
 function chooseBestK(vectors, maxK) {
   const upper = Math.max(2, Math.min(maxK, Math.min(8, vectors.length)));
-  let bestK = 2; let bestScore = -Infinity;
+  let bestK = 2; let best = -Infinity;
   for (let k = 2; k <= upper; k += 1) {
-    const a = kmeans(vectors, k, 8);
+    const a = kmeans(vectors, k, 6);
     let intra = 0; let inter = 0; let ic = 0; let ec = 0;
     for (let i = 0; i < vectors.length; i += 1) for (let j = i + 1; j < vectors.length; j += 1) {
-      const sim = cosine(vectors[i], vectors[j]);
-      if (a[i] === a[j]) { intra += sim; ic += 1; } else { inter += sim; ec += 1; }
+      const s = cosine(vectors[i], vectors[j]);
+      if (a[i] === a[j]) { intra += s; ic += 1; } else { inter += s; ec += 1; }
     }
-    const score = intra / Math.max(ic, 1) - inter / Math.max(ec, 1);
-    if (score > bestScore) { bestScore = score; bestK = k; }
+    const score = intra / Math.max(1, ic) - inter / Math.max(1, ec);
+    if (score > best) { best = score; bestK = k; }
   }
   return bestK;
 }
 
-function topTerms(clusterVectors, vocab, count = 5) {
+function topTerms(clusterVectors, vocab) {
   const sums = new Array(vocab.length).fill(0);
   clusterVectors.forEach((v) => { for (let i = 0; i < v.length; i += 1) sums[i] += v[i]; });
-  return sums.map((value, idx) => ({ term: vocab[idx], value })).sort((a, b) => b.value - a.value).slice(0, count).map((t) => t.term.replace(/^(prev_|next_|domain_|bg_)/, ""));
+  return sums.map((value, idx) => ({ term: vocab[idx], value })).sort((a, b) => b.value - a.value).slice(0, 4).map((t) => t.term.replace(/^(prev_|next_|domain_|bg_)/, ""));
 }
 
 function renderActivities(activities) {
-  const list = document.querySelector("#activityList");
-  list.innerHTML = "";
-  activities.slice(0, 25).forEach((item) => {
+  const ul = document.querySelector("#activityList");
+  ul.innerHTML = "";
+  activities.slice(0, 25).forEach((a) => {
     const li = document.createElement("li");
-    li.textContent = `${new Date(item.timestamp).toLocaleTimeString()} — ${item.title}`;
-    list.appendChild(li);
+    li.textContent = `${new Date(a.timestamp).toLocaleTimeString()} — ${a.title}`;
+    ul.appendChild(li);
   });
 }
 
 function renderTopicGroups(activities, labels) {
-  const groups = {};
-  labels.forEach((label, i) => {
-    if (!groups[label]) groups[label] = [];
-    groups[label].push(activities[i]);
-  });
-  const parent = document.querySelector("#topicGroups");
-  parent.innerHTML = "";
-  Object.entries(groups).sort((a, b) => b[1].length - a[1].length).forEach(([label, items]) => {
+  const map = {};
+  labels.forEach((l, i) => { if (!map[l]) map[l] = []; map[l].push(activities[i]); });
+  const root = document.querySelector("#topicGroups");
+  root.innerHTML = "";
+  Object.entries(map).sort((a, b) => b[1].length - a[1].length).forEach(([label, list]) => {
     const card = document.createElement("article");
     card.className = "topic-card";
-    card.innerHTML = `<h3>${label} (${items.length})</h3>`;
+    card.innerHTML = `<h3>${label} (${list.length})</h3>`;
     const ul = document.createElement("ul");
-    items.slice(0, 6).forEach((x) => { const li = document.createElement("li"); li.textContent = x.title; ul.appendChild(li); });
+    list.slice(0, 6).forEach((x) => { const li = document.createElement("li"); li.textContent = x.title; ul.appendChild(li); });
     card.appendChild(ul);
-    parent.appendChild(card);
+    root.appendChild(card);
   });
 }
 
 function renderClassificationTimeline(activities, labels, userLabels) {
-  const parent = document.querySelector("#classificationList");
-  parent.innerHTML = "";
-  activities.slice(0, 20).forEach((activity, i) => {
+  const root = document.querySelector("#classificationList");
+  root.innerHTML = "";
+  activities.slice(0, 20).forEach((a, i) => {
     const row = document.createElement("div");
     row.className = "class-row";
-    const current = userLabels[activity.id] || labels[i];
-    row.innerHTML = `<div class="class-title">${new Date(activity.timestamp).toLocaleTimeString()} — ${activity.title}</div>`;
-    const select = document.createElement("select");
-    select.dataset.id = activity.id;
-    CLASS_LABELS.forEach((label) => {
-      const option = document.createElement("option");
-      option.value = label;
-      option.textContent = label;
-      if (label === current) option.selected = true;
-      select.appendChild(option);
+    row.innerHTML = `<div class='class-title'>${new Date(a.timestamp).toLocaleTimeString()} — ${a.title}</div>`;
+    const sel = document.createElement("select");
+    sel.dataset.id = a.id;
+    const current = userLabels[a.id] || labels[i];
+    CLASS_LABELS.forEach((l) => {
+      const o = document.createElement("option");
+      o.value = l; o.textContent = l; if (l === current) o.selected = true;
+      sel.appendChild(o);
     });
-    row.appendChild(select);
-    parent.appendChild(row);
+    row.appendChild(sel);
+    root.appendChild(row);
   });
 }
 
-function renderClusters(vectors, vocab, kmeansAssignments, agAssignments, k) {
-  const parent = document.querySelector("#clusters");
-  parent.innerHTML = "";
-  [
-    { name: "K-Means", assignments: kmeansAssignments },
-    { name: "Agglomerative", assignments: agAssignments }
-  ].forEach((method) => {
+function renderClusters(vectors, vocab, km, ag, k) {
+  const root = document.querySelector("#clusters");
+  root.innerHTML = "";
+  [{ name: "K-Means", a: km }, { name: "Agglomerative", a: ag }].forEach((m) => {
     const card = document.createElement("article");
     card.className = "cluster-card";
-    const title = document.createElement("h3");
-    title.textContent = `${method.name} (${k} clusters)`;
-    card.appendChild(title);
+    card.innerHTML = `<h3>${m.name} (${k} clusters)</h3>`;
     const ul = document.createElement("ul");
-    for (let cluster = 0; cluster < k; cluster += 1) {
-      const idxs = method.assignments.map((v, i) => (v === cluster ? i : -1)).filter((i) => i >= 0);
-      if (!idxs.length) continue;
+    for (let c = 0; c < k; c += 1) {
+      const idx = m.a.map((x, i) => (x === c ? i : -1)).filter((x) => x >= 0);
+      if (!idx.length) continue;
       const li = document.createElement("li");
-      li.textContent = `Cluster ${cluster + 1}: ${idxs.length} items • ${topTerms(idxs.map((idx) => vectors[idx]), vocab, 4).join(", ")}`;
+      li.textContent = `Cluster ${c + 1}: ${idx.length} items • ${topTerms(idx.map((i) => vectors[i]), vocab).join(", ")}`;
       ul.appendChild(li);
     }
     card.appendChild(ul);
-    parent.appendChild(card);
+    root.appendChild(card);
   });
 }
 
-function renderSimilarityGraph(activities, vectors, assignments, labels) {
+function renderSimilarityGraph(activities, vectors, assignments, docs, labels) {
   const canvas = document.querySelector("#graph");
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const limit = Math.min(18, activities.length);
-  const nodes = activities.slice(0, limit).map((activity, i) => {
-    const angle = (Math.PI * 2 * i) / Math.max(limit, 1);
-    const radius = 88 + (i % 4) * 16;
-    return { label: parseUrl(activity.url).domain.slice(0, 18), x: canvas.width / 2 + Math.cos(angle) * radius, y: canvas.height / 2 + Math.sin(angle) * radius, cluster: assignments[i] ?? 0 };
+  const n = Math.min(18, activities.length);
+  const nodes = activities.slice(0, n).map((a, i) => {
+    const angle = (Math.PI * 2 * i) / Math.max(1, n);
+    const radius = 86 + (i % 4) * 14;
+    return { x: canvas.width / 2 + Math.cos(angle) * radius, y: canvas.height / 2 + Math.sin(angle) * radius, label: parseUrl(a.url).domain.slice(0, 18), c: assignments[i] || 0 };
   });
 
-  const palette = ["#7db6ff", "#9fd0ff", "#b2e2ff", "#8ec5ff", "#78b0f0", "#9bc8ea", "#a8d5ff"];
-  for (let i = 0; i < nodes.length; i += 1) for (let j = i + 1; j < nodes.length; j += 1) {
-    const sim = contextualSimilarity(i, j, activities, vectors, labels);
-    if (sim < 0.28) continue;
-    ctx.strokeStyle = `rgba(80,130,190,${Math.min(0.76, sim)})`;
-    ctx.lineWidth = 0.6 + sim * 2.2;
+  for (let i = 0; i < n; i += 1) for (let j = i + 1; j < n; j += 1) {
+    const sim = semanticSimilarity(i, j, activities, vectors, docs, labels);
+    if (sim < 0.3) continue;
+    ctx.strokeStyle = `rgba(80,130,190,${Math.min(0.8, sim)})`;
+    ctx.lineWidth = 0.6 + sim * 2;
     ctx.beginPath(); ctx.moveTo(nodes[i].x, nodes[i].y); ctx.lineTo(nodes[j].x, nodes[j].y); ctx.stroke();
   }
-  nodes.forEach((n) => {
-    ctx.fillStyle = palette[n.cluster % palette.length];
-    ctx.beginPath(); ctx.arc(n.x, n.y, 8, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#1b486f"; ctx.font = "10px sans-serif"; ctx.fillText(n.label, n.x + 9, n.y + 4);
+
+  const palette = ["#7db6ff", "#9fd0ff", "#b2e2ff", "#8ec5ff", "#78b0f0", "#9bc8ea", "#a8d5ff"];
+  nodes.forEach((node) => {
+    ctx.fillStyle = palette[node.c % palette.length];
+    ctx.beginPath(); ctx.arc(node.x, node.y, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#1b486f"; ctx.font = "10px sans-serif"; ctx.fillText(node.label, node.x + 8, node.y + 3);
   });
 }
 
@@ -372,15 +323,14 @@ function renderSiteGraph(activities) {
   const canvas = document.querySelector("#siteGraph");
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const domainCounts = {};
-  activities.forEach((item) => { const d = parseUrl(item.url).domain; domainCounts[d] = (domainCounts[d] || 0) + 1; });
-  const entries = Object.entries(domainCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  const maxVal = Math.max(...entries.map((e) => e[1]), 1);
-  entries.forEach(([domain, value], idx) => {
-    const x = 26 + idx * 66; const h = (value / maxVal) * 140; const y = canvas.height - 38 - h;
+  const counts = {};
+  activities.forEach((a) => { const d = parseUrl(a.url).domain; counts[d] = (counts[d] || 0) + 1; });
+  const rows = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const max = Math.max(1, ...rows.map((r) => r[1]));
+  rows.forEach(([d, v], idx) => {
+    const x = 26 + idx * 66; const h = (v / max) * 140; const y = canvas.height - 38 - h;
     ctx.fillStyle = "#97c8ff"; ctx.fillRect(x, y, 52, h);
-    ctx.fillStyle = "#245784"; ctx.font = "10px sans-serif";
-    ctx.fillText(String(value), x + 18, y - 4); ctx.fillText(domain.slice(0, 9), x, canvas.height - 18);
+    ctx.fillStyle = "#245784"; ctx.font = "10px sans-serif"; ctx.fillText(String(v), x + 18, y - 4); ctx.fillText(d.slice(0, 9), x, canvas.height - 18);
   });
 }
 
@@ -388,65 +338,63 @@ function renderCorrelationMap(activities, labels) {
   const canvas = document.querySelector("#correlationMap");
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const domains = [...new Set(activities.map((x) => parseUrl(x.url).domain))].slice(0, 7);
+  const domains = [...new Set(activities.map((a) => parseUrl(a.url).domain))].slice(0, 7);
   const classes = CLASS_LABELS.slice(0, 6);
   const matrix = classes.map(() => domains.map(() => 0));
-
-  activities.forEach((item, i) => {
-    const d = domains.indexOf(parseUrl(item.url).domain);
-    const c = classes.indexOf(labels[i]);
-    if (d >= 0 && c >= 0) matrix[c][d] += 1;
+  activities.forEach((a, i) => {
+    const di = domains.indexOf(parseUrl(a.url).domain); const ci = classes.indexOf(labels[i]);
+    if (di >= 0 && ci >= 0) matrix[ci][di] += 1;
   });
-
-  const maxV = Math.max(...matrix.flat(), 1);
-  classes.forEach((klass, r) => {
-    ctx.fillStyle = "#2a5b87"; ctx.font = "11px sans-serif"; ctx.fillText(klass.slice(0, 14), 8, 34 + r * 26);
-    domains.forEach((domain, c) => {
-      const val = matrix[r][c];
-      ctx.fillStyle = `rgba(102,170,238,${Math.max(0.08, val / maxV)})`;
+  const max = Math.max(1, ...matrix.flat());
+  classes.forEach((cl, r) => {
+    ctx.fillStyle = "#2a5b87"; ctx.font = "11px sans-serif"; ctx.fillText(cl.slice(0, 14), 8, 34 + r * 26);
+    domains.forEach((d, c) => {
+      const v = matrix[r][c];
+      ctx.fillStyle = `rgba(102,170,238,${Math.max(0.08, v / max)})`;
       ctx.fillRect(130 + c * 70, 16 + r * 26, 66, 22);
-      ctx.fillStyle = "#173f63"; ctx.font = "10px sans-serif"; ctx.fillText(String(val), 157 + c * 70, 33 + r * 26);
+      ctx.fillStyle = "#173f63"; ctx.font = "10px sans-serif"; ctx.fillText(String(v), 157 + c * 70, 33 + r * 26);
     });
   });
-  domains.forEach((domain, c) => { ctx.fillStyle = "#2a5b87"; ctx.font = "10px sans-serif"; ctx.fillText(domain.slice(0, 9), 132 + c * 70, 12); });
+  domains.forEach((d, c) => { ctx.fillStyle = "#2a5b87"; ctx.font = "10px sans-serif"; ctx.fillText(d.slice(0, 9), 132 + c * 70, 12); });
 }
 
 async function run() {
   const { activities = [], userLabels = {} } = await chrome.storage.local.get(["activities", "userLabels"]);
-  const windowSize = Number(document.querySelector("#timeWindow").value) || 60;
+  const windowSize = Number(document.querySelector("#timeWindow")?.value || 60);
   const items = activities.slice(0, windowSize);
 
   renderActivities(items);
   if (items.length < 3) {
-    ["#topicGroups", "#clusters", "#classificationList"].forEach((selector) => {
-      document.querySelector(selector).innerHTML = "<p class='muted'>Need more browsing activity to analyze.</p>";
+    ["#topicGroups", "#clusters", "#classificationList"].forEach((id) => {
+      const el = document.querySelector(id);
+      if (el) el.innerHTML = "<p class='muted'>Need more browsing activity to analyze.</p>";
     });
     return;
   }
 
-  const { vectors, vocab, docs } = buildTfIdfVectors(items);
+  const { docs, vectors, vocab } = buildTfIdfVectors(items);
   const labels = classifyActivities(items, docs, userLabels);
-  const autoK = chooseBestK(vectors, Number(document.querySelector("#clusterCount").value) || 5);
-  const km = kmeans(vectors, autoK);
-  const ag = agglomerative(vectors, autoK);
+  const k = chooseBestK(vectors, Number(document.querySelector("#clusterCount")?.value || 5));
+  const km = kmeans(vectors, k);
+  const ag = agglomerative(vectors, k);
 
   renderTopicGroups(items, labels);
   renderClassificationTimeline(items, labels, userLabels);
-  renderClusters(vectors, vocab, km, ag, autoK);
-  renderSimilarityGraph(items, vectors, km, labels);
+  renderClusters(vectors, vocab, km, ag, k);
+  renderSimilarityGraph(items, vectors, km, docs, labels);
   renderSiteGraph(items);
   renderCorrelationMap(items, labels);
 }
 
-document.querySelector("#runCluster").addEventListener("click", run);
-document.querySelector("#timeWindow").addEventListener("change", run);
-document.querySelector("#saveCorrections").addEventListener("click", async () => {
+document.querySelector("#runCluster")?.addEventListener("click", run);
+document.querySelector("#timeWindow")?.addEventListener("change", run);
+document.querySelector("#saveCorrections")?.addEventListener("click", async () => {
   const { userLabels = {} } = await chrome.storage.local.get("userLabels");
   document.querySelectorAll("#classificationList select").forEach((el) => { userLabels[el.dataset.id] = el.value; });
   await chrome.storage.local.set({ userLabels });
   await run();
 });
-document.querySelector("#clearData").addEventListener("click", async () => {
+document.querySelector("#clearData")?.addEventListener("click", async () => {
   await chrome.storage.local.set({ activities: [], userLabels: {} });
   await run();
 });
