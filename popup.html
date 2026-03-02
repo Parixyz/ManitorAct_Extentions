@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Activity Cluster Graph</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Activity Cluster Graph</h1>
+      <p class="subtitle">NLP clustering from your recent browsing activity</p>
+
+      <section class="controls">
+        <label>
+          Clusters
+          <input id="clusterCount" type="number" min="2" max="8" value="3" />
+        </label>
+        <button id="runCluster">Run clustering</button>
+        <button id="clearData" class="danger">Clear</button>
+      </section>
+
+      <section>
+        <h2>Activity graph</h2>
+        <canvas id="graph" width="560" height="280"></canvas>
+      </section>
+
+      <section>
+        <h2>Clusters</h2>
+        <div id="clusters"></div>
+      </section>
+
+      <section>
+        <h2>Recent activity</h2>
+        <ul id="activityList"></ul>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

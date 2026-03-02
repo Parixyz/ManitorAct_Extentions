@@ -1,0 +1,85 @@
+:root {
+  color-scheme: light dark;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  width: 600px;
+}
+
+main {
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+h1, h2, p {
+  margin: 0;
+}
+
+.subtitle {
+  opacity: 0.75;
+  font-size: 0.9rem;
+}
+
+.controls {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+label {
+  display: grid;
+  font-size: 0.85rem;
+  gap: 4px;
+}
+
+input, button {
+  font: inherit;
+  padding: 6px 9px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button.danger {
+  background: #8b2a2a;
+  color: white;
+  border: 0;
+}
+
+#graph {
+  width: 100%;
+  border: 1px solid #6664;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff22, #00000008);
+}
+
+#clusters {
+  display: grid;
+  gap: 8px;
+}
+
+.cluster-card {
+  border: 1px solid #6664;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.cluster-card h3 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+.cluster-card ul,
+#activityList {
+  margin: 0;
+  padding-left: 20px;
+}
+
+#activityList li {
+  margin: 4px 0;
+  font-size: 0.85rem;
+}
